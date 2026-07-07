@@ -3,6 +3,6 @@ import detectionController from '../controllers/detectionController.js';
 
 const router = Router();
 
-router.get('/', detectionController.detect);
+router.post('/', detectionController.detect);
 
 export default router;

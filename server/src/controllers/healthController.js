@@ -1,6 +1,9 @@
+import healthService from '../services/healthService.js';
+
 class HealthController {
     get = async (req, res) => {
-        res.status(200).json({ status: 'ok' });
+        const health = healthService.checkHealth();
+        res.status(200).json(health);
     
     }
 }

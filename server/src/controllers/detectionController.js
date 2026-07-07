@@ -1,6 +1,8 @@
 class DetectionController {
     detect = async (req, res) => {
-        res.status(200).json({ message: 'Detection successful' });
+        const text = req.body.text;
+        const detection = detectionService.detect(text);
+        res.status(200).json(detection);
     }
 }
 
