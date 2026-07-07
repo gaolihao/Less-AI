@@ -1,8 +1,9 @@
-const healthController = {
-    get: (req, res) => {
+class HealthController {
+    get = async (req, res) => {
         res.status(200).json({ status: 'ok' });
     
     }
 }
 
-export default healthController;
+export default new HealthController();
+
