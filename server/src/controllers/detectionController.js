@@ -1,3 +1,5 @@
+import detectionService from '../services/detectionService.js';
+
 class DetectionController {
     detect = async (req, res) => {
         const text = req.body.text;
