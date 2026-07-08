@@ -1,10 +1,17 @@
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from detector import predict
 from predict import load_model
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 class PredictRequest(BaseModel):
@@ -17,7 +24,9 @@ class PredictResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    logger.info("Starting model service")
     load_model()
+    logger.info("Model service ready")
     yield
 
 

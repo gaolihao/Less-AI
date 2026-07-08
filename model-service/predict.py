@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +11,8 @@ import torch
 import torch.nn.functional as F
 from peft import AutoPeftModelForSequenceClassification
 from transformers import AutoTokenizer
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL_DIR = (
     Path(os.environ.get("BUGPROJECT_ROOT", ".")).expanduser().resolve()
@@ -70,12 +73,15 @@ def load_model(model_dir: Path | str | None = None) -> None:
     global _model, _tokenizer, _device, _label_for_id
 
     path = _resolve_model_dir(model_dir)
-    _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    _device = torch.device("cpu")
+    logger.info("Loading model from %s on device: %s", path, _device)
+
     _tokenizer = AutoTokenizer.from_pretrained(path)
     _model = AutoPeftModelForSequenceClassification.from_pretrained(path)
     _model.to(_device)
     _model.eval()
     _label_for_id = _label_map_from_config(_model.config)
+    logger.info("Model loaded. Label mapping: %s", _label_for_id)
 
 
 def predict_proba(text: str, model_dir: Path | str | None = None) -> Prediction:
@@ -93,6 +99,8 @@ def predict_proba(text: str, model_dir: Path | str | None = None) -> Prediction:
     if _model is None or _tokenizer is None:
         load_model(model_dir)
 
+    logger.info("Running prediction on %s (length=%d chars)", _device, len(text))
+
     inputs = _tokenizer(
         str(text),
         truncation=True,
@@ -106,10 +114,17 @@ def predict_proba(text: str, model_dir: Path | str | None = None) -> Prediction:
         probs = F.softmax(logits, dim=-1).squeeze(0).cpu().tolist()
 
     by_label = {_label_for_id[i]: float(probs[i]) for i in range(len(probs))}
-    return Prediction(
+    result = Prediction(
         probability_ai=by_label.get("AI", 0.0),
         probability_human=by_label.get("Human", 0.0),
     )
+    logger.info(
+        "Prediction complete: AI=%.4f, Human=%.4f, label=%s",
+        result.probability_ai,
+        result.probability_human,
+        result.label,
+    )
+    return result
 
 
 def main() -> None:
