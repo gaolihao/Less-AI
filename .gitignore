@@ -32,7 +32,6 @@ lerna-debug.log*
 **/__pycache__/
 **/.venv/
 *.pyc
-model-service/models/
 .vscode/
 .idea/
 .DS_Store
