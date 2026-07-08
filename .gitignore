@@ -28,7 +28,10 @@ lerna-debug.log*
 !.env.production
 !.env.example
 
-# Editor files
+# Python
+**/__pycache__/
+**/.venv/
+*.pyc
 .vscode/
 .idea/
 .DS_Store

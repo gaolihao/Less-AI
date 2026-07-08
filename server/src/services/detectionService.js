@@ -1,5 +1,18 @@
-function detect(text) {
-    return { score: 0.5 };
+const MODEL_SERVICE_URL = process.env.MODEL_SERVICE_URL || 'http://localhost:8000';
+
+async function detect(text) {
+    const response = await fetch(`${MODEL_SERVICE_URL}/predict`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+    });
+
+    if (!response.ok) {
+        throw new Error(`Model service error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return { score: data.score };
 }
 
 export default { detect };
