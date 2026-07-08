@@ -1,14 +1,6 @@
-import express from 'express';
-import healthRouter from './routers/healthRouter.js';
-import detectionRouter from './routers/detectionRouter.js';
+import app from './app.js';
 
-const app = express();
-const PORT = 3000 || process.env.PORT;
-
-app.use(express.json());
-
-app.use('/', healthRouter);
-app.use('/detection', detectionRouter);
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
