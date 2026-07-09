@@ -1,4 +1,4 @@
-from predict import load_model, predict_proba
+from predict_tfidf_logreg import load_model, predict_proba
 
 
 def predict(text: str) -> float:

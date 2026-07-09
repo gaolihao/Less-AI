@@ -1,0 +1,20 @@
+{
+  "model_name": "TF-IDF + OneVsRest(LogReg)",
+  "labels": [
+    "AI",
+    "Human"
+  ],
+  "dataset_csv": "C:\\Users\\justu\\.cache\\kagglehub\\datasets\\matejkore\\ai-detector-dataset\\versions\\4\\ai_detector_dataset.csv",
+  "dataset_rows_raw": 332232,
+  "training_rows": 332182,
+  "sample_size": null,
+  "vectorizer": {
+    "type": "TfidfVectorizer",
+    "ngram_range": [
+      1,
+      2
+    ],
+    "max_features": 200000,
+    "min_df": 2
+  }
+}

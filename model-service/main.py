@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from detector import predict
-from predict import load_model
+from predict_tfidf_logreg import load_model
 
 logging.basicConfig(
     level=logging.INFO,
