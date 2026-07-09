@@ -1,0 +1,21 @@
+name: Keep alive
+
+on:
+  schedule:
+    # Render free tier spins down after ~15 min idle; ping every 10 min
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+env:
+  API_URL: https://ai-text-detector-server.onrender.com
+  MODEL_URL: https://ai-text-detector-4xxg.onrender.com
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping API server
+        run: curl -fsS --max-time 120 "${{ env.API_URL }}/"
+
+      - name: Ping model service
+        run: curl -fsS --max-time 120 "${{ env.MODEL_URL }}/health"
