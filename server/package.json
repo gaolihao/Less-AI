@@ -6,6 +6,7 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test tests/services/*.test.js tests/integration/*.test.js",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=src/** --test-coverage-exclude=tests/** tests/services/*.test.js tests/integration/*.test.js",
     "start": "nodemon src/server.js",
     "dev": "nodemon src/server.js"
   },
