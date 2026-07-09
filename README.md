@@ -2,6 +2,8 @@
 
 A full-stack web app that estimates how likely a piece of text was written by AI. It includes a React frontend, a Node.js API, and a Python model service using TF-IDF + OneVsRest Logistic Regression.
 
+The detection model (`models/tfidf_ovr_logreg/pipeline.joblib`) comes from [AI-Detector-ML](https://github.com/gaolihao/AI-Detector-ML) by [gaolihao](https://github.com/gaolihao).
+
 ## Live deployment
 
 | Service | URL |
@@ -109,6 +111,8 @@ npm test
 
 ## Train the TF-IDF model (optional)
 
+The training pipeline in this repo is adapted from [AI-Detector-ML](https://github.com/gaolihao/AI-Detector-ML). To retrain locally:
+
 ```bash
 cd model-service
 python predict_tfidf_logreg.py --train
@@ -131,7 +135,7 @@ npm run storybook
 
 - **Frontend:** React, Vite
 - **API:** Express, CORS
-- **Model:** scikit-learn (TF-IDF + OneVsRest Logistic Regression), FastAPI, uvicorn
+- **Model:** scikit-learn (TF-IDF + OneVsRest Logistic Regression), FastAPI, uvicorn — model from [AI-Detector-ML](https://github.com/gaolihao/AI-Detector-ML)
 
 ---
 
