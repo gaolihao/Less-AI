@@ -15,7 +15,7 @@ The detection model (`models/tfidf_ovr_logreg/pipeline.joblib`) comes from [AI-D
 ## Architecture
 
 ```
-client (React + Vite)
+client (React + Vite + Redux Toolkit)
     ↓  POST /detection
 server (Express)
     ↓  POST /predict
@@ -26,9 +26,17 @@ model-service (FastAPI + scikit-learn)
 
 ```
 AIDetectorProject/
-├── client/          # React frontend
-├── server/          # Express API
-└── model-service/   # Python inference service
+├── client/                 # React frontend
+│   └── src/
+│       ├── components/     # UI components (Gauge, etc.)
+│       └── store/          # Redux store + detection async thunk
+├── server/                 # Express API
+│   ├── src/
+│   │   ├── controllers/
+│   │   ├── routers/
+│   │   └── services/
+│   └── tests/
+└── model-service/          # Python inference service
 ```
 
 ## Run locally
@@ -76,6 +84,8 @@ The client calls `http://localhost:3000` by default. To override, set `VITE_API_
 VITE_API_URL=http://localhost:3000
 ```
 
+Scan requests are dispatched via Redux Toolkit (`createAsyncThunk` in `client/src/store/detectionSlice.js`).
+
 ## API
 
 ### `GET /`
@@ -104,10 +114,20 @@ Response:
 
 ## Tests
 
+Server tests use Node's built-in test runner with Supertest.
+
 ```bash
 cd server
 npm test
 ```
+
+Coverage report (used in CI):
+
+```bash
+npm run test:coverage
+```
+
+GitHub Actions runs `npm run test:coverage` on push and pull request (see `.github/workflows/test.yml`).
 
 ## Train the TF-IDF model (optional)
 
@@ -133,9 +153,10 @@ npm run storybook
 
 ## Tech stack
 
-- **Frontend:** React, Vite
-- **API:** Express, CORS
+- **Frontend:** React, Vite, Redux Toolkit, react-redux
+- **API:** Express, CORS, Supertest
 - **Model:** scikit-learn (TF-IDF + OneVsRest Logistic Regression), FastAPI, uvicorn — model from [AI-Detector-ML](https://github.com/gaolihao/AI-Detector-ML)
+- **CI:** GitHub Actions (server tests + coverage)
 
 ---
 
