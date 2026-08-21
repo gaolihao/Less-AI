@@ -1,6 +1,6 @@
 # AI Text Detector
 
-A full-stack web app that estimates how likely a piece of text was written by AI. It includes a React frontend, a Node.js API, and a Python model service using TF-IDF + OneVsRest Logistic Regression.
+A full-stack web app that estimates how likely a piece of text was written by AI. It includes a React frontend, a Node.js API with a sectioned integrity-style analyze endpoint, and a Python model service using TF-IDF + OneVsRest Logistic Regression.
 
 The detection model (`models/tfidf_ovr_logreg/pipeline.joblib`) comes from [AI-Detector-ML](https://github.com/gaolihao/AI-Detector-ML) by [gaolihao](https://github.com/gaolihao).
 
@@ -29,7 +29,8 @@ Only the **API server** and **model service** need pings — the static frontend
 
 ```
 client (React + Vite + Redux Toolkit)
-    ↓  POST /detection
+    ↓  POST /agent/analyze   (sectioned integrity-style report)
+    ↓  POST /detection        (single score; still available)
 server (Express)
     ↓  POST /predict
 model-service (FastAPI + scikit-learn)
@@ -47,7 +48,7 @@ AIDetectorProject/
 │   ├── src/
 │   │   ├── controllers/
 │   │   ├── routers/
-│   │   └── services/
+│   │   └── services/       # detection + agent (split/detect/report)
 │   └── tests/
 └── model-service/          # Python inference service
 ```
@@ -109,7 +110,40 @@ Health check.
 { "status": "ok" }
 ```
 
+### `POST /agent/analyze`
+
+Sectioned integrity-style analysis (v1): split text → detect overall + per section → structured report with tool trace and caveats.
+
+Request:
+
+```json
+{ "text": "Paragraph one.\n\nParagraph two." }
+```
+
+Response:
+
+```json
+{
+  "overallScore": 0.72,
+  "sections": [
+    { "id": 1, "excerpt": "Paragraph one.", "score": 0.68 },
+    { "id": 2, "excerpt": "Paragraph two.", "score": 0.81 }
+  ],
+  "actionsTaken": ["split", "detect"],
+  "report": "Overall AI-likelihood estimate: 72% (medium risk band). ...",
+  "caveats": [
+    "Not proof of misconduct or AI authorship.",
+    "Short sections and mixed human/AI text are less reliable.",
+    "Scores are model estimates and can be wrong; use human judgment."
+  ]
+}
+```
+
+`overallScore` / section `score` values are estimated AI-likelihood (0–1).
+
 ### `POST /detection`
+
+Single overall score (kept for simple clients and tests).
 
 Request:
 

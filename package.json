@@ -1,0 +1,13 @@
+{
+  "name": "ai-detector-project",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n model,server,client -c blue,green,magenta \"npm run dev:model\" \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:model": "cd model-service && python -m uvicorn main:app --reload --port 8000",
+    "dev:server": "npm run dev --prefix server",
+    "dev:client": "npm run dev --prefix client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

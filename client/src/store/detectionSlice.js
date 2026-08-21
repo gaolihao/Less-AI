@@ -2,10 +2,14 @@ import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 
+function toPercent(score) {
+  return Math.round(score * 100);
+}
+
 export const scanText = createAsyncThunk(
   'detection/scan',
   async (text, { rejectWithValue }) => {
-    const response = await fetch(`${API_BASE}/detection`, {
+    const response = await fetch(`${API_BASE}/agent/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
@@ -15,9 +19,21 @@ export const scanText = createAsyncThunk(
       return rejectWithValue('Detection request failed');
     }
 
-    const { score } = await response.json();
-    const aiScore = Math.round(score * 100);
-    return { aiScore, humanScore: 100 - aiScore };
+    const data = await response.json();
+    const aiScore = toPercent(data.overallScore);
+
+    return {
+      aiScore,
+      humanScore: 100 - aiScore,
+      sections: (data.sections ?? []).map((section) => ({
+        id: section.id,
+        excerpt: section.excerpt,
+        aiScore: toPercent(section.score),
+      })),
+      actionsTaken: data.actionsTaken ?? [],
+      report: data.report ?? '',
+      caveats: data.caveats ?? [],
+    };
   },
 );
 
