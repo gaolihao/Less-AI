@@ -41,26 +41,31 @@ describe('paraphraseService', () => {
         assert.equal(paraphraseService.getProvider(), 'openai');
     });
 
-    it('paraphrase throws when no API key is configured', async () => {
+    it('rewrite throws when no API key is configured', async () => {
         clearProviderEnv();
         await assert.rejects(
-            () => paraphraseService.paraphrase('hello'),
-            /Paraphrase API key not configured/,
+            () => paraphraseService.humanize('hello'),
+            /Rewrite API key not configured/,
         );
     });
 
-    it('paraphrase returns Gemini model content', async () => {
+    it('humanize returns Gemini model content', async () => {
         process.env.GEMINI_API_KEY = 'gemini-key';
         mock.method(globalThis, 'fetch', async (url, options) => {
             assert.match(String(url), /generativelanguage\.googleapis\.com/);
             assert.equal(options.headers['x-goog-api-key'], 'gemini-key');
+            const body = JSON.parse(options.body);
+            assert.match(
+                body.systemInstruction.parts[0].text,
+                /less like generic AI/i,
+            );
             return {
                 ok: true,
                 json: async () => ({
                     candidates: [
                         {
                             content: {
-                                parts: [{ text: ' Reworded text. ' }],
+                                parts: [{ text: ' Human sounding text. ' }],
                             },
                         },
                     ],
@@ -68,8 +73,8 @@ describe('paraphraseService', () => {
             };
         });
 
-        const result = await paraphraseService.paraphrase('Original text.');
-        assert.equal(result, 'Reworded text.');
+        const result = await paraphraseService.humanize('Original text.');
+        assert.equal(result, 'Human sounding text.');
     });
 
     it('paraphrase returns OpenAI model content', async () => {

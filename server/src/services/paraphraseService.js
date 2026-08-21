@@ -2,8 +2,12 @@ const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 const GEMINI_API_BASE =
     'https://generativelanguage.googleapis.com/v1beta/models';
 
-const PARAPHRASE_INSTRUCTION =
-    'You paraphrase the user text. Preserve meaning but change wording and sentence structure. Return only the paraphrased text with no quotes, labels, or commentary.';
+const INSTRUCTIONS = {
+    paraphrase:
+        'You paraphrase the user text. Preserve meaning but change wording and sentence structure. Return only the paraphrased text with no quotes, labels, or commentary.',
+    humanize:
+        'Rewrite the text so it sounds more natural and human-written, and less like generic AI output. Keep the same meaning, facts, and approximate length. Prefer varied sentence rhythm, concrete wording, and a natural voice. Avoid buzzwords, stiff parallelism, and filler transitions. Return only the rewritten text with no quotes, labels, or commentary.',
+};
 
 /**
  * Auto: gemini if GEMINI_API_KEY is set, else openai if OPENAI_API_KEY is set.
@@ -35,7 +39,11 @@ function getOpenAIModel() {
     return process.env.OPENAI_MODEL || 'gpt-4o-mini';
 }
 
-async function paraphraseWithGemini(text) {
+function resolveInstruction(mode) {
+    return INSTRUCTIONS[mode] || INSTRUCTIONS.humanize;
+}
+
+async function rewriteWithGemini(text, instruction) {
     const model = getGeminiModel();
     const url = `${GEMINI_API_BASE}/${model}:generateContent`;
 
@@ -47,7 +55,7 @@ async function paraphraseWithGemini(text) {
         },
         body: JSON.stringify({
             systemInstruction: {
-                parts: [{ text: PARAPHRASE_INSTRUCTION }],
+                parts: [{ text: instruction }],
             },
             contents: [
                 {
@@ -56,7 +64,7 @@ async function paraphraseWithGemini(text) {
                 },
             ],
             generationConfig: {
-                temperature: 0.7,
+                temperature: 0.85,
             },
         }),
     });
@@ -64,24 +72,24 @@ async function paraphraseWithGemini(text) {
     if (!response.ok) {
         const detail = await response.text().catch(() => '');
         throw new Error(
-            `Gemini paraphrase error: ${response.status}${detail ? ` ${detail}` : ''}`,
+            `Gemini rewrite error: ${response.status}${detail ? ` ${detail}` : ''}`,
         );
     }
 
     const data = await response.json();
-    const paraphrased = data?.candidates?.[0]?.content?.parts
+    const rewritten = data?.candidates?.[0]?.content?.parts
         ?.map((part) => part.text ?? '')
         .join('')
         .trim();
 
-    if (!paraphrased) {
-        throw new Error('Gemini paraphrase returned empty content');
+    if (!rewritten) {
+        throw new Error('Gemini rewrite returned empty content');
     }
 
-    return paraphrased;
+    return rewritten;
 }
 
-async function paraphraseWithOpenAI(text) {
+async function rewriteWithOpenAI(text, instruction) {
     const response = await fetch(OPENAI_API_URL, {
         method: 'POST',
         headers: {
@@ -90,16 +98,10 @@ async function paraphraseWithOpenAI(text) {
         },
         body: JSON.stringify({
             model: getOpenAIModel(),
-            temperature: 0.7,
+            temperature: 0.85,
             messages: [
-                {
-                    role: 'system',
-                    content: PARAPHRASE_INSTRUCTION,
-                },
-                {
-                    role: 'user',
-                    content: String(text ?? ''),
-                },
+                { role: 'system', content: instruction },
+                { role: 'user', content: String(text ?? '') },
             ],
         }),
     });
@@ -107,28 +109,33 @@ async function paraphraseWithOpenAI(text) {
     if (!response.ok) {
         const detail = await response.text().catch(() => '');
         throw new Error(
-            `OpenAI paraphrase error: ${response.status}${detail ? ` ${detail}` : ''}`,
+            `OpenAI rewrite error: ${response.status}${detail ? ` ${detail}` : ''}`,
         );
     }
 
     const data = await response.json();
-    const paraphrased = data?.choices?.[0]?.message?.content?.trim();
+    const rewritten = data?.choices?.[0]?.message?.content?.trim();
 
-    if (!paraphrased) {
-        throw new Error('OpenAI paraphrase returned empty content');
+    if (!rewritten) {
+        throw new Error('OpenAI rewrite returned empty content');
     }
 
-    return paraphrased;
+    return rewritten;
 }
 
 /**
- * Paraphrase text via Gemini (default when key set) or OpenAI.
+ * Rewrite text via Gemini (default when key set) or OpenAI.
+ * @param {string} text
+ * @param {{ mode?: 'humanize' | 'paraphrase' }} [options]
  */
-async function paraphrase(text) {
+async function rewrite(text, options = {}) {
+    const mode = options.mode === 'paraphrase' ? 'paraphrase' : 'humanize';
+    const instruction = resolveInstruction(mode);
     const provider = getProvider();
+
     if (!provider) {
         throw new Error(
-            'Paraphrase API key not configured (set GEMINI_API_KEY or OPENAI_API_KEY)',
+            'Rewrite API key not configured (set GEMINI_API_KEY or OPENAI_API_KEY)',
         );
     }
 
@@ -136,13 +143,21 @@ async function paraphrase(text) {
         if (!process.env.GEMINI_API_KEY) {
             throw new Error('GEMINI_API_KEY not configured');
         }
-        return paraphraseWithGemini(text);
+        return rewriteWithGemini(text, instruction);
     }
 
     if (!process.env.OPENAI_API_KEY) {
         throw new Error('OPENAI_API_KEY not configured');
     }
-    return paraphraseWithOpenAI(text);
+    return rewriteWithOpenAI(text, instruction);
 }
 
-export default { paraphrase, isEnabled, getProvider };
+async function humanize(text) {
+    return rewrite(text, { mode: 'humanize' });
+}
+
+async function paraphrase(text) {
+    return rewrite(text, { mode: 'paraphrase' });
+}
+
+export default { rewrite, humanize, paraphrase, isEnabled, getProvider };

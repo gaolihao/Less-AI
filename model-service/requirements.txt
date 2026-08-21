@@ -3,3 +3,5 @@ uvicorn[standard]>=0.32.0
 scikit-learn
 joblib
 pandas
+python-dotenv>=1.0.0
+huggingface_hub>=0.26.0

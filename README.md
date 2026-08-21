@@ -1,6 +1,6 @@
-# AI Text Detector
+# Less AI — Humanizer Agent
 
-A full-stack web app that estimates how likely a piece of text was written by AI. It includes a React frontend, a Node.js API with a sectioned integrity-style analyze endpoint, and a Python model service using TF-IDF + OneVsRest Logistic Regression.
+A full-stack app that turns AI-sounding text into a more natural draft. A chat agent works **step by step with confirmations**: split into **sentences** → score each with an AI-vs-human detector (Hugging Face Inference when `HF_TOKEN` is set, otherwise TF-IDF) → humanize only sentences ≥60% AI-likelihood → stitch the document back.
 
 The detection model (`models/tfidf_ovr_logreg/pipeline.joblib`) comes from [AI-Detector-ML](https://github.com/gaolihao/AI-Detector-ML) by [gaolihao](https://github.com/gaolihao).
 
@@ -28,13 +28,16 @@ Render spins down web services after ~15 minutes with no traffic. The first requ
 Only the **API server** and **model service** need pings — the static frontend does not spin down.
 
 ```
-client (React + Vite + Redux Toolkit)
-    ↓  POST /agent/analyze   (sectioned report + optional paraphrase recheck)
+client (React chat UI)
+    ↓  POST /agent/turn      (stepwise humanize agent + confirmations)
+    ↓  POST /agent/analyze   (one-shot humanize)
     ↓  POST /detection        (single score; still available)
 server (Express)
-    ├─ detect → model-service /predict
-    └─ paraphrase_recheck → Gemini or OpenAI (optional API key)
-model-service (FastAPI + scikit-learn)
+    ├─ detect sentences → model-service /predict/sentences
+    └─ humanize flagged spans → Gemini or OpenAI
+model-service (FastAPI)
+    ├─ sentence split + HF Inference classifier (optional HF_TOKEN)
+    └─ TF-IDF fallback (scikit-learn)
 ```
 
 ## Project structure
@@ -43,7 +46,7 @@ model-service (FastAPI + scikit-learn)
 AIDetectorProject/
 ├── client/                 # React frontend
 │   └── src/
-│       ├── components/     # UI components (Gauge, etc.)
+│       ├── components/     # UI (chat analysis bubble, Gauge, etc.)
 │       └── store/          # Redux store + detection async thunk
 ├── server/                 # Express API
 │   ├── src/
@@ -66,7 +69,15 @@ pip install -r requirements.txt
 python -m uvicorn main:app --port 8000
 ```
 
-The service loads `models/tfidf_ovr_logreg/pipeline.joblib`. If the model is missing, it trains one automatically on first startup (requires training data).
+Optional `model-service/.env`:
+
+```env
+HF_TOKEN=hf_...
+HF_DETECTOR_MODEL=Hello-SimpleAI/chatgpt-detector-roberta
+DETECTOR_BACKEND=auto
+```
+
+With `HF_TOKEN`, sentence scoring uses Hugging Face Inference. Without it, the service falls back to the local TF-IDF detector per sentence.
 
 ### 2. API server (port 3000)
 
@@ -87,7 +98,7 @@ GEMINI_MODEL=gemini-3.5-flash-lite
 # or: OPENAI_API_KEY=sk-...
 ```
 
-Set `GEMINI_API_KEY` (preferred; free tier via Google AI Studio) or `OPENAI_API_KEY` to enable the v2 paraphrase robustness recheck. Without a key, analyze still works and notes that recheck was skipped.
+Set `GEMINI_API_KEY` (preferred; free tier via Google AI Studio) or `OPENAI_API_KEY` to enable rewriting. Without a key, the agent can still split/score and skip to returning the original text.
 
 ### 3. Frontend (port 5173)
 
@@ -117,40 +128,41 @@ Health check.
 { "status": "ok" }
 ```
 
+### `POST /agent/turn`
+
+Stepwise humanize agent with confirmation gates:
+
+1. `action: "start"` + text → **immediately** scores each sentence and flags ≥60%
+2. `action: "confirm"` → humanize flagged spans and **return the final draft** (with before/after scores when verification is on)
+3. Optional `action: "skip"` → return original text immediately
+4. `action: "cancel"` ends the session
+
+Request example:
+
+```json
+{ "action": "start", "text": "Paragraph one.\n\nParagraph two.", "options": { "flagThresholdPercent": 60 } }
+```
+
+Response after start (scoring already done):
+
+```json
+{
+  "sessionId": "...",
+  "status": "awaiting_confirmation",
+  "stepCompleted": "detect",
+  "nextStep": "humanize",
+  "message": "Scored N sentences… Flagged K at ≥60%… Continue, or skip rewriting?",
+  "partial": { "overallScore": 0.72, "sections": [] },
+  "analysis": null,
+  "confirmOptions": ["confirm", "skip", "cancel"]
+}
+```
+
+Completed analysis includes `rewrittenText`, optional `rewrittenOverallScore`, and per-section rewrite fields.
+
 ### `POST /agent/analyze`
 
-Sectioned integrity-style analysis (v2): split → detect overall + per section → optional paraphrase recheck on mid/high sections → structured report with tool trace and caveats.
-
-Request:
-
-```json
-{
-  "text": "Paragraph one.\n\nParagraph two.",
-  "options": { "paraphraseCheck": true }
-}
-```
-
-Response:
-
-```json
-{
-  "overallScore": 0.72,
-  "sections": [
-    { "id": 1, "excerpt": "Paragraph one.", "score": 0.68, "recheckScore": 0.51 },
-    { "id": 2, "excerpt": "Paragraph two.", "score": 0.81, "recheckScore": 0.77 }
-  ],
-  "actionsTaken": ["split", "detect", "paraphrase_recheck"],
-  "report": "Overall AI-likelihood estimate: 72% (medium risk band). ...",
-  "caveats": [
-    "Not proof of misconduct or AI authorship.",
-    "Short sections and mixed human/AI text are less reliable.",
-    "Scores are model estimates and can be wrong; use human judgment.",
-    "Paraphrase recheck probes score stability under wording changes; it is not a definitive test."
-  ]
-}
-```
-
-`recheckScore` is `null` when a section was not rechecked (low score, cap reached, or paraphrase disabled/unavailable).
+One-shot helper that auto-confirms every step (useful for scripts/tests). Same final payload as a completed turn session.
 
 ### `POST /detection`
 

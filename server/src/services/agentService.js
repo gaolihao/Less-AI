@@ -1,75 +1,126 @@
+import { randomUUID } from 'node:crypto';
 import detectionService from './detectionService.js';
 import paraphraseService from './paraphraseService.js';
 
-const MAX_SECTIONS = 15;
-const LONG_BLOCK_CHARS = 400;
+const MAX_SENTENCES = 40;
 const EXCERPT_CHARS = 180;
-const RECHECK_THRESHOLD = 0.4;
-const MAX_RECHECKS = 5;
+const DEFAULT_FLAG_THRESHOLD = 0.6;
+const MAX_REWRITES = 12;
+
+/** @type {Map<string, object>} */
+const sessions = new Map();
 
 /**
- * Split text into analysis sections (paragraphs, then sentences for long blocks).
- * Pure helper — exported for unit tests.
+ * Split text into sentence spans (for preview before model scoring).
  */
-export function splitSections(text) {
-    const normalized = String(text ?? '')
-        .replace(/\r\n/g, '\n')
-        .trim();
-
-    if (!normalized) {
+export function splitSentences(text, { maxSentences = MAX_SENTENCES } = {}) {
+    const raw = String(text ?? '');
+    if (!raw.trim()) {
         return [];
     }
 
-    let parts = normalized
-        .split(/\n\s*\n/)
-        .map((part) => part.trim())
-        .filter(Boolean);
+    const pattern =
+        /[^.!?]*?(?:[.!?]+["'\u201d\u2019)\]]*)(?=\s+|$)|(?:\S[^.!?]*$)/gs;
+    const spans = [];
 
-    if (parts.length === 1 && parts[0].length > LONG_BLOCK_CHARS) {
-        parts = splitBySentences(parts[0]);
-    }
-
-    if (parts.length > MAX_SECTIONS) {
-        const head = parts.slice(0, MAX_SECTIONS - 1);
-        const tail = parts.slice(MAX_SECTIONS - 1).join('\n\n');
-        parts = [...head, tail];
-    }
-
-    return parts.map((sectionText, index) => ({
-        id: index + 1,
-        text: sectionText,
-        excerpt: makeExcerpt(sectionText),
-    }));
-}
-
-export function shouldRecheckSection(score) {
-    return score >= RECHECK_THRESHOLD;
-}
-
-function splitBySentences(block) {
-    const sentences = block.match(/[^.!?]+[.!?]+|[^.!?]+$/g);
-    if (!sentences || sentences.length < 2) {
-        return [block];
-    }
-
-    const sections = [];
-    let buffer = '';
-
-    for (const sentence of sentences) {
-        const next = buffer ? `${buffer} ${sentence.trim()}` : sentence.trim();
-        if (buffer && next.length > LONG_BLOCK_CHARS) {
-            sections.push(buffer);
-            buffer = sentence.trim();
-        } else {
-            buffer = next;
+    for (const match of raw.matchAll(pattern)) {
+        const full = match[0];
+        if (!full) continue;
+        const absoluteStart = match.index ?? 0;
+        const leading = full.length - full.trimStart().length;
+        const trailing = full.length - full.trimEnd().length;
+        const start = absoluteStart + leading;
+        const end = absoluteStart + full.length - trailing;
+        const piece = raw.slice(start, end);
+        if (piece.trim()) {
+            spans.push({ text: piece, start, end });
         }
     }
 
-    if (buffer) {
-        sections.push(buffer);
+    if (spans.length === 0) {
+        const stripped = raw.trim();
+        const start = raw.indexOf(stripped);
+        return [
+            {
+                id: 1,
+                text: stripped,
+                excerpt: makeExcerpt(stripped),
+                start,
+                end: start + stripped.length,
+            },
+        ];
     }
 
-    return sections.length > 0 ? sections : [block];
+    let limited = spans;
+    if (spans.length > maxSentences) {
+        const head = spans.slice(0, maxSentences - 1);
+        const tail = spans.slice(maxSentences - 1);
+        const mergedStart = tail[0].start;
+        const mergedEnd = tail[tail.length - 1].end;
+        limited = [
+            ...head,
+            {
+                text: raw.slice(mergedStart, mergedEnd),
+                start: mergedStart,
+                end: mergedEnd,
+            },
+        ];
+    }
+
+    return limited.map((span, index) => ({
+        id: index + 1,
+        text: span.text,
+        excerpt: makeExcerpt(span.text),
+        start: span.start,
+        end: span.end,
+    }));
+}
+
+/** @deprecated Use splitSentences */
+export function splitSections(text) {
+    return splitSentences(text).map(({ id, text: sectionText, excerpt }) => ({
+        id,
+        text: sectionText,
+        excerpt,
+    }));
+}
+
+export function shouldRewriteSection(score, threshold = DEFAULT_FLAG_THRESHOLD) {
+    return typeof score === 'number' && score >= threshold;
+}
+
+export function shouldRecheckSection(score, threshold = DEFAULT_FLAG_THRESHOLD) {
+    return shouldRewriteSection(score, threshold);
+}
+
+export function normalizeFlagThreshold(value) {
+    if (typeof value !== 'number' || Number.isNaN(value)) {
+        return DEFAULT_FLAG_THRESHOLD;
+    }
+    // Accept either 0–1 or 0–100
+    const ratio = value > 1 ? value / 100 : value;
+    return Math.min(1, Math.max(0, ratio));
+}
+
+/**
+ * Replace rewritten spans in the original document (end → start).
+ */
+export function stitchRewrites(original, sections) {
+    let output = String(original ?? '');
+    const ordered = [...sections].sort((a, b) => b.start - a.start);
+
+    for (const section of ordered) {
+        if (typeof section.start !== 'number' || typeof section.end !== 'number') {
+            continue;
+        }
+        const replacement = section.rewrittenText ?? section.text ?? '';
+        output =
+            output.slice(0, section.start) +
+            replacement +
+            output.slice(section.end);
+    }
+
+    return output;
 }
 
 function makeExcerpt(sectionText) {
@@ -85,163 +136,433 @@ function riskBand(score) {
     return 'high';
 }
 
-function buildReport({ overallScore, sections, recheckCount }) {
+export function buildReport({
+    overallScore,
+    rewrittenOverallScore,
+    sections,
+    rewrittenCount,
+    backend,
+    flagThreshold = DEFAULT_FLAG_THRESHOLD,
+}) {
     const band = riskBand(overallScore);
     const pct = Math.round(overallScore * 100);
-    const highSections = sections.filter((s) => s.score > 0.75);
-    const midSections = sections.filter((s) => s.score >= 0.4 && s.score <= 0.75);
-
+    const thresholdPct = Math.round(flagThreshold * 100);
+    const flagged = sections.filter((s) =>
+        shouldRewriteSection(s.score, flagThreshold),
+    ).length;
     const lines = [
-        `Overall AI-likelihood estimate: ${pct}% (${band} risk band).`,
-        `Analyzed ${sections.length} section${sections.length === 1 ? '' : 's'}.`,
+        `Original AI-likelihood estimate: ${pct}% (${band} risk band).`,
+        `Scored ${sections.length} sentence${sections.length === 1 ? '' : 's'}` +
+            (backend ? ` via ${backend}` : '') +
+            `.`,
+        `Flagged ${flagged} sentence${flagged === 1 ? '' : 's'} at or above ${thresholdPct}% AI-likelihood.`,
     ];
 
-    if (highSections.length > 0) {
+    if (rewrittenCount > 0) {
         lines.push(
-            `Higher-signal sections: ${highSections.map((s) => `#${s.id}`).join(', ')}.`,
-        );
-    } else if (midSections.length > 0) {
-        lines.push(
-            `Uncertain / mid-range sections: ${midSections.map((s) => `#${s.id}`).join(', ')}.`,
+            `Humanized ${rewrittenCount} flagged sentence${rewrittenCount === 1 ? '' : 's'} and stitched them back into the document.`,
         );
     } else {
-        lines.push('No section scored in the high-risk band.');
+        lines.push('No sentences were rewritten.');
     }
 
-    if (recheckCount > 0) {
-        const drifted = sections.filter(
-            (s) =>
-                typeof s.recheckScore === 'number' &&
-                Math.abs(s.recheckScore - s.score) >= 0.15,
-        );
+    if (typeof rewrittenOverallScore === 'number') {
         lines.push(
-            `Paraphrase robustness recheck ran on ${recheckCount} section${recheckCount === 1 ? '' : 's'}.`,
+            `Rewritten text AI-likelihood estimate: ${Math.round(rewrittenOverallScore * 100)}%.`,
         );
-        if (drifted.length > 0) {
-            lines.push(
-                `Score shifted ≥15 pts after paraphrase on: ${drifted.map((s) => `#${s.id}`).join(', ')} — treat those estimates cautiously.`,
-            );
-        } else {
-            lines.push('Recheck scores stayed relatively stable after paraphrase.');
-        }
     }
 
     lines.push(
-        'This is an automated screening signal for human review — not proof of authorship or misconduct.',
+        'This is a drafting aid — review the rewrite before using it anywhere that requires authentic voice.',
     );
 
     return lines.join(' ');
 }
 
 const DEFAULT_CAVEATS = [
-    'Not proof of misconduct or AI authorship.',
-    'Short sections and mixed human/AI text are less reliable.',
-    'Scores are model estimates and can be wrong; use human judgment.',
-    'Paraphrase recheck probes score stability under wording changes; it is not a definitive test.',
+    'Rewrites can change tone or nuance; verify meaning before publishing.',
+    'Lower AI-detector scores are not proof the text is human-written.',
+    'Sentence-level detectors are imperfect, especially on short sentences.',
+    'Use this as an editing assistant, not as a way to misrepresent authorship.',
 ];
 
-/**
- * v2 integrity-style analysis: split → detect → optional paraphrase recheck → report.
- */
-async function analyze(text, options = {}) {
-    const paraphraseCheck =
-        options.paraphraseCheck ?? paraphraseService.isEnabled();
+function publicSections(sections = [], flagThreshold = DEFAULT_FLAG_THRESHOLD) {
+    return sections.map((section) => ({
+        id: section.id,
+        excerpt: section.excerpt,
+        start: section.start,
+        end: section.end,
+        score: typeof section.score === 'number' ? section.score : null,
+        flagged: shouldRewriteSection(section.score, flagThreshold),
+        rewrittenText: section.rewrittenText ?? null,
+        rewrittenExcerpt: section.rewrittenText
+            ? makeExcerpt(section.rewrittenText)
+            : null,
+        rewrittenScore:
+            typeof section.rewrittenScore === 'number'
+                ? section.rewrittenScore
+                : null,
+    }));
+}
 
-    const actionsTaken = ['split'];
-    const caveats = [...DEFAULT_CAVEATS];
-    const sections = splitSections(text);
+function rewriteCandidates(sections = [], flagThreshold = DEFAULT_FLAG_THRESHOLD) {
+    return sections
+        .filter((s) => shouldRewriteSection(s.score, flagThreshold))
+        .slice(0, MAX_REWRITES);
+}
 
-    if (sections.length === 0) {
-        const { score } = await detectionService.detect(text ?? '');
-        actionsTaken.push('detect');
-
-        return {
-            overallScore: score,
-            sections: [],
-            actionsTaken,
-            report: buildReport({
-                overallScore: score,
-                sections: [],
-                recheckCount: 0,
-            }),
-            caveats,
-        };
-    }
-
-    const { score: overallScore } = await detectionService.detect(
-        String(text ?? '').trim(),
-    );
-    actionsTaken.push('detect');
-
-    const scoredSections = [];
-    for (const section of sections) {
-        const { score } = await detectionService.detect(section.text);
-        scoredSections.push({
-            id: section.id,
-            excerpt: section.excerpt,
-            text: section.text,
-            score,
-            recheckScore: null,
-        });
-    }
-
-    let recheckCount = 0;
-
-    if (paraphraseCheck && !paraphraseService.isEnabled()) {
-        caveats.push(
-            'Paraphrase robustness check skipped — set GEMINI_API_KEY or OPENAI_API_KEY on the server to enable.',
-        );
-    } else if (paraphraseCheck && paraphraseService.isEnabled()) {
-        for (const section of scoredSections) {
-            if (recheckCount >= MAX_RECHECKS) {
-                break;
-            }
-            if (!shouldRecheckSection(section.score)) {
-                continue;
-            }
-
-            try {
-                const paraphrased = await paraphraseService.paraphrase(section.text);
-                const { score: recheckScore } =
-                    await detectionService.detect(paraphrased);
-                section.recheckScore = recheckScore;
-                recheckCount += 1;
-            } catch (err) {
-                console.error(
-                    `Paraphrase recheck failed for section #${section.id}:`,
-                    err.message,
-                );
-                caveats.push(
-                    `Paraphrase recheck failed for section #${section.id}; original score kept.`,
-                );
-            }
-        }
-
-        if (recheckCount > 0) {
-            actionsTaken.push('paraphrase_recheck');
-        }
-    }
-
-    const responseSections = scoredSections.map(
-        ({ id, excerpt, score, recheckScore }) => ({
-            id,
-            excerpt,
-            score,
-            recheckScore,
-        }),
-    );
-
+function buildPartial(session) {
     return {
-        overallScore,
-        sections: responseSections,
-        actionsTaken,
-        report: buildReport({
-            overallScore,
-            sections: responseSections,
-            recheckCount,
-        }),
-        caveats,
+        overallScore: session.overallScore,
+        rewrittenOverallScore: session.rewrittenOverallScore,
+        originalText: session.text,
+        rewrittenText: session.rewrittenText,
+        detectorBackend: session.detectorBackend ?? null,
+        flagThreshold: session.flagThreshold,
+        sections: publicSections(session.sections, session.flagThreshold),
+        actionsTaken: [...session.actionsTaken],
     };
 }
 
-export default { analyze, splitSections, shouldRecheckSection };
+function buildFinalAnalysis(session) {
+    const sections = publicSections(session.sections, session.flagThreshold);
+    const rewrittenCount = session.sections.filter(
+        (s) => s.rewrittenText && s.rewrittenText !== s.text,
+    ).length;
+    return {
+        overallScore: session.overallScore,
+        rewrittenOverallScore: session.rewrittenOverallScore,
+        originalText: session.text,
+        rewrittenText: session.rewrittenText ?? session.text,
+        detectorBackend: session.detectorBackend ?? null,
+        flagThreshold: session.flagThreshold,
+        sections,
+        actionsTaken: [...session.actionsTaken],
+        report: buildReport({
+            overallScore: session.overallScore,
+            rewrittenOverallScore: session.rewrittenOverallScore,
+            sections,
+            rewrittenCount,
+            backend: session.detectorBackend,
+            flagThreshold: session.flagThreshold,
+        }),
+        caveats: [...session.caveats],
+    };
+}
+
+async function runDetect(session) {
+    const result = await detectionService.detectSentences(session.text);
+    session.overallScore = result.overallScore;
+    session.detectorBackend = result.backend;
+
+    if (!session.actionsTaken.includes('detect')) {
+        session.actionsTaken.push('detect');
+    }
+
+    session.sections = (result.sentences ?? []).map((sentence) => ({
+        id: sentence.id,
+        text: sentence.text,
+        excerpt: makeExcerpt(sentence.text),
+        start: sentence.start,
+        end: sentence.end,
+        score: sentence.score,
+        rewrittenText: null,
+        rewrittenScore: null,
+    }));
+}
+
+async function runHumanize(session) {
+    if (!paraphraseService.isEnabled()) {
+        throw new Error(
+            'Rewrite API key not configured (set GEMINI_API_KEY or OPENAI_API_KEY)',
+        );
+    }
+
+    const candidates = rewriteCandidates(session.sections, session.flagThreshold);
+    const candidateIds = new Set(candidates.map((c) => c.id));
+    let rewrittenCount = 0;
+
+    for (const section of session.sections) {
+        if (!candidateIds.has(section.id)) {
+            section.rewrittenText = section.text;
+            section.rewrittenScore = section.score;
+            continue;
+        }
+
+        try {
+            const rewritten = await paraphraseService.humanize(section.text);
+            section.rewrittenText = rewritten;
+            const { score } = await detectionService.detect(rewritten);
+            section.rewrittenScore = score;
+            rewrittenCount += 1;
+        } catch (err) {
+            console.error(
+                `Humanize failed for sentence #${section.id}:`,
+                err.message,
+            );
+            section.rewrittenText = section.text;
+            section.rewrittenScore = section.score;
+            session.caveats.push(
+                `Rewrite failed for sentence #${section.id}; original text kept.`,
+            );
+        }
+    }
+
+    session.rewrittenText = stitchRewrites(session.text, session.sections);
+
+    const { score } = await detectionService.detect(session.rewrittenText);
+    session.rewrittenOverallScore = score;
+
+    if (rewrittenCount > 0 && !session.actionsTaken.includes('humanize')) {
+        session.actionsTaken.push('humanize');
+    }
+
+    return rewrittenCount;
+}
+
+function awaiting({
+    sessionId,
+    stepCompleted,
+    nextStep,
+    message,
+    partial,
+    confirmOptions = ['confirm', 'cancel'],
+}) {
+    return {
+        sessionId,
+        status: 'awaiting_confirmation',
+        stepCompleted,
+        nextStep,
+        message,
+        partial,
+        analysis: null,
+        confirmOptions,
+    };
+}
+
+function completed(sessionId, analysis, message) {
+    sessions.delete(sessionId);
+    return {
+        sessionId,
+        status: 'completed',
+        stepCompleted: 'humanize',
+        nextStep: null,
+        message,
+        partial: null,
+        analysis,
+        confirmOptions: [],
+    };
+}
+
+async function turn({ action, sessionId, text, options = {} } = {}) {
+    if (action === 'start') {
+        const trimmed = String(text ?? '').trim();
+        if (!trimmed) {
+            const error = new Error('Text is required to start');
+            error.statusCode = 400;
+            throw error;
+        }
+
+        if (sessionId) {
+            sessions.delete(sessionId);
+        }
+
+        const flagThreshold = normalizeFlagThreshold(
+            options.flagThreshold ?? DEFAULT_FLAG_THRESHOLD,
+        );
+        const thresholdPct = Math.round(flagThreshold * 100);
+        const id = randomUUID();
+        const session = {
+            text: trimmed,
+            flagThreshold,
+            nextStep: 'humanize',
+            sections: [],
+            overallScore: null,
+            rewrittenOverallScore: null,
+            rewrittenText: null,
+            detectorBackend: null,
+            actionsTaken: [],
+            caveats: [...DEFAULT_CAVEATS],
+        };
+        sessions.set(id, session);
+
+        await runDetect(session);
+        const candidates = rewriteCandidates(
+            session.sections,
+            session.flagThreshold,
+        );
+
+        const llmReady = paraphraseService.isEnabled();
+        const confirmOptions = llmReady
+            ? candidates.length > 0
+                ? ['confirm', 'skip', 'cancel']
+                : ['skip', 'cancel']
+            : ['skip', 'cancel'];
+
+        const backendNote = session.detectorBackend
+            ? ` (detector: ${session.detectorBackend})`
+            : '';
+        let message;
+        if (!llmReady) {
+            message = `Scored ${session.sections.length} sentence${session.sections.length === 1 ? '' : 's'}${backendNote} — overall ${Math.round(session.overallScore * 100)}%, flagged ${candidates.length} at ≥${thresholdPct}%. Rewriting needs GEMINI_API_KEY or OPENAI_API_KEY. Skip to keep the original text?`;
+        } else if (candidates.length > 0) {
+            message = `Scored ${session.sections.length} sentence${session.sections.length === 1 ? '' : 's'}${backendNote} — overall ${Math.round(session.overallScore * 100)}%. Flagged ${candidates.length} at ≥${thresholdPct}% AI-likelihood. Continue to humanize those and return the draft with before/after scores, or skip rewriting?`;
+        } else {
+            message = `Scored ${session.sections.length} sentence${session.sections.length === 1 ? '' : 's'}${backendNote} — overall ${Math.round(session.overallScore * 100)}%. Nothing met the ≥${thresholdPct}% flag threshold. Skip to keep the original text?`;
+        }
+
+        return awaiting({
+            sessionId: id,
+            stepCompleted: 'detect',
+            nextStep: 'humanize',
+            message,
+            partial: buildPartial(session),
+            confirmOptions,
+        });
+    }
+
+    if (action === 'cancel') {
+        if (sessionId) {
+            sessions.delete(sessionId);
+        }
+        return {
+            sessionId: sessionId ?? null,
+            status: 'cancelled',
+            stepCompleted: null,
+            nextStep: null,
+            message: 'Cancelled. Paste new text whenever you’re ready.',
+            partial: null,
+            analysis: null,
+            confirmOptions: [],
+        };
+    }
+
+    if (action !== 'confirm' && action !== 'skip') {
+        const error = new Error('Invalid action');
+        error.statusCode = 400;
+        throw error;
+    }
+
+    const session = sessions.get(sessionId);
+    if (!session) {
+        const error = new Error('Session not found or expired');
+        error.statusCode = 404;
+        throw error;
+    }
+
+    if (action === 'skip') {
+        if (session.nextStep !== 'humanize') {
+            const error = new Error('Skip is only available before rewriting');
+            error.statusCode = 400;
+            throw error;
+        }
+        session.caveats.push('Rewrite skipped by user; original text returned.');
+        session.rewrittenText = session.text;
+        session.rewrittenOverallScore = session.overallScore;
+        for (const section of session.sections) {
+            section.rewrittenText = section.text;
+            section.rewrittenScore = section.score;
+        }
+        const analysis = buildFinalAnalysis(session);
+        return completed(
+            sessionId,
+            analysis,
+            'Kept your original wording. Here’s the scored draft for review.',
+        );
+    }
+
+    if (session.nextStep === 'humanize') {
+        const candidates = rewriteCandidates(
+            session.sections,
+            session.flagThreshold,
+        );
+        if (candidates.length === 0) {
+            session.rewrittenText = session.text;
+            session.rewrittenOverallScore = session.overallScore;
+            for (const section of session.sections) {
+                section.rewrittenText = section.text;
+                section.rewrittenScore = section.score;
+            }
+            const analysis = buildFinalAnalysis(session);
+            return completed(
+                sessionId,
+                analysis,
+                'No sentences met the flag threshold, so nothing was rewritten. Here’s the scored draft.',
+            );
+        }
+
+        const rewrittenCount = await runHumanize(session);
+        const analysis = buildFinalAnalysis(session);
+        const before = Math.round(session.overallScore * 100);
+        const after =
+            typeof session.rewrittenOverallScore === 'number'
+                ? Math.round(session.rewrittenOverallScore * 100)
+                : null;
+        const scoreNote =
+            after === null
+                ? ''
+                : ` Before/after AI-likelihood: ${before}% → ${after}%.`;
+
+        return completed(
+            sessionId,
+            analysis,
+            rewrittenCount > 0
+                ? `Here’s your humanized draft (${rewrittenCount} sentence${rewrittenCount === 1 ? '' : 's'} rewritten).${scoreNote} Review it before you use it.`
+                : `No sentences changed. Here’s the scored draft.${scoreNote}`,
+        );
+    }
+
+    const error = new Error('Session is in an invalid state');
+    error.statusCode = 400;
+    throw error;
+}
+
+async function analyze(text, options = {}) {
+    const start = await turn({
+        action: 'start',
+        text,
+        options,
+    });
+
+    let current = start;
+    while (current.status === 'awaiting_confirmation') {
+        if (
+            current.nextStep === 'humanize' &&
+            !current.confirmOptions.includes('confirm')
+        ) {
+            current = await turn({
+                action: 'skip',
+                sessionId: current.sessionId,
+            });
+            continue;
+        }
+        current = await turn({
+            action: 'confirm',
+            sessionId: current.sessionId,
+        });
+    }
+
+    if (current.status !== 'completed' || !current.analysis) {
+        throw new Error('One-shot humanize did not complete');
+    }
+
+    return current.analysis;
+}
+
+function clearSessions() {
+    sessions.clear();
+}
+
+export default {
+    analyze,
+    turn,
+    splitSentences,
+    splitSections,
+    stitchRewrites,
+    shouldRewriteSection,
+    shouldRecheckSection,
+    buildReport,
+    clearSessions,
+    DEFAULT_FLAG_THRESHOLD,
+    normalizeFlagThreshold,
+};

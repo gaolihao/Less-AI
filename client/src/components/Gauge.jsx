@@ -1,4 +1,4 @@
-export default function Gauge({ value }) {
+export default function Gauge({ value, size = 'md' }) {
   const hasValue = value !== null;
   const percent = hasValue ? Math.min(100, Math.max(0, value)) : 0;
   const radius = 70;
@@ -8,7 +8,7 @@ export default function Gauge({ value }) {
   const center = 100;
 
   return (
-    <div className="gauge">
+    <div className={`gauge gauge-${size}`}>
       <svg viewBox="0 0 200 200" aria-hidden="true">
         <circle
           cx={center}

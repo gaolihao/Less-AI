@@ -1,134 +1,142 @@
 import { describe, it, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import agentService, {
-    splitSections,
-    shouldRecheckSection,
+    splitSentences,
+    stitchRewrites,
+    shouldRewriteSection,
 } from '../../src/services/agentService.js';
 import detectionService from '../../src/services/detectionService.js';
 import paraphraseService from '../../src/services/paraphraseService.js';
 
-describe('splitSections', () => {
+describe('splitSentences', () => {
     it('returns empty array for blank text', () => {
-        assert.deepEqual(splitSections(''), []);
-        assert.deepEqual(splitSections('   \n\n  '), []);
+        assert.deepEqual(splitSentences(''), []);
+        assert.deepEqual(splitSentences('   \n\n  '), []);
     });
 
-    it('splits on paragraph breaks', () => {
-        const sections = splitSections('First paragraph.\n\nSecond paragraph.');
-        assert.equal(sections.length, 2);
-        assert.equal(sections[0].id, 1);
-        assert.equal(sections[0].text, 'First paragraph.');
-        assert.equal(sections[1].text, 'Second paragraph.');
-    });
-
-    it('keeps a short single block as one section', () => {
-        const sections = splitSections('Just one short block.');
-        assert.equal(sections.length, 1);
-        assert.equal(sections[0].excerpt, 'Just one short block.');
-    });
-
-    it('truncates long excerpts', () => {
-        const long = 'a'.repeat(250);
-        const [section] = splitSections(long);
-        assert.ok(section.excerpt.endsWith('…'));
-        assert.ok(section.excerpt.length < long.length);
+    it('splits on sentence boundaries with spans', () => {
+        const text = 'First sentence. Second sentence!';
+        const sentences = splitSentences(text);
+        assert.equal(sentences.length, 2);
+        assert.equal(sentences[0].text, 'First sentence.');
+        assert.equal(sentences[1].text, 'Second sentence!');
+        assert.equal(text.slice(sentences[0].start, sentences[0].end), 'First sentence.');
     });
 });
 
-describe('shouldRecheckSection', () => {
-    it('rechecks mid and high scores only', () => {
-        assert.equal(shouldRecheckSection(0.39), false);
-        assert.equal(shouldRecheckSection(0.4), true);
-        assert.equal(shouldRecheckSection(0.9), true);
+describe('stitchRewrites', () => {
+    it('replaces only rewritten spans', () => {
+        const original = 'Hello world. Keep this.';
+        const sentences = splitSentences(original);
+        sentences[0].rewrittenText = 'Hi earth.';
+        sentences[1].rewrittenText = sentences[1].text;
+        const stitched = stitchRewrites(original, sentences);
+        assert.equal(stitched, 'Hi earth. Keep this.');
+    });
+});
+
+describe('shouldRewriteSection', () => {
+    it('flags scores at or above 0.6', () => {
+        assert.equal(shouldRewriteSection(0.59), false);
+        assert.equal(shouldRewriteSection(0.6), true);
+        assert.equal(shouldRewriteSection(0.9), true);
     });
 });
 
 describe('agentService.analyze', () => {
     afterEach(() => {
         mock.restoreAll();
+        agentService.clearSessions();
     });
 
-    it('returns overall score, sections, actions, report, and caveats', async () => {
-        let call = 0;
-        mock.method(detectionService, 'detect', async () => {
-            call += 1;
-            return { score: call === 1 ? 0.6 : 0.7 };
-        });
-        mock.method(paraphraseService, 'isEnabled', () => false);
-
-        const result = await agentService.analyze(
-            'Paragraph one is here.\n\nParagraph two is here.',
-            { paraphraseCheck: false },
-        );
-
-        assert.equal(result.overallScore, 0.6);
-        assert.equal(result.sections.length, 2);
-        assert.equal(result.sections[0].id, 1);
-        assert.equal(result.sections[0].score, 0.7);
-        assert.equal(result.sections[0].recheckScore, null);
-        assert.deepEqual(result.actionsTaken, ['split', 'detect']);
-        assert.ok(typeof result.report === 'string');
-        assert.ok(result.report.includes('60%'));
-        assert.ok(Array.isArray(result.caveats));
-        assert.ok(result.caveats.length > 0);
-    });
-
-    it('still detects when text has no sections after trim', async () => {
-        mock.method(detectionService, 'detect', async () => ({ score: 0.2 }));
-
-        const result = await agentService.analyze('   ', {
-            paraphraseCheck: false,
-        });
-
-        assert.equal(result.overallScore, 0.2);
-        assert.deepEqual(result.sections, []);
-        assert.deepEqual(result.actionsTaken, ['split', 'detect']);
-    });
-
-    it('runs paraphrase recheck on mid/high sections', async () => {
-        // overall, s1, s2, s3, then recheck(s1), recheck(s3)
-        const detectScores = [0.65, 0.7, 0.2, 0.5, 0.55, 0.4];
-        let detectCall = 0;
-        mock.method(detectionService, 'detect', async () => {
-            const score = detectScores[detectCall] ?? 0.5;
-            detectCall += 1;
-            return { score };
-        });
+    it('humanizes only flagged sentences and stitches the document', async () => {
+        const original = 'AI sounding sentence one. Human casual sentence.';
+        const spans = splitSentences(original);
+        mock.method(detectionService, 'detectSentences', async () => ({
+            overallScore: 0.72,
+            backend: 'tfidf',
+            sentences: [
+                { ...spans[0], score: 0.82 },
+                { ...spans[1], score: 0.2 },
+            ],
+        }));
+        mock.method(detectionService, 'detect', async () => ({ score: 0.3 }));
         mock.method(paraphraseService, 'isEnabled', () => true);
-        mock.method(paraphraseService, 'paraphrase', async (text) => {
-            return `Rewritten: ${text}`;
+        mock.method(paraphraseService, 'humanize', async (text) => `Human:${text}`);
+
+        const result = await agentService.analyze(original, {
+            flagThreshold: 0.6,
         });
 
-        const result = await agentService.analyze(
-            'Risky paragraph one.\n\nSafe low score paragraph.\n\nAnother mid paragraph.',
-            { paraphraseCheck: true },
-        );
-
-        assert.deepEqual(result.actionsTaken, [
-            'split',
-            'detect',
-            'paraphrase_recheck',
-        ]);
-        assert.equal(result.sections[0].score, 0.7);
-        assert.equal(result.sections[0].recheckScore, 0.55);
-        assert.equal(result.sections[1].score, 0.2);
-        assert.equal(result.sections[1].recheckScore, null);
-        assert.equal(result.sections[2].score, 0.5);
-        assert.equal(result.sections[2].recheckScore, 0.4);
-        assert.ok(result.report.includes('Paraphrase robustness recheck'));
+        assert.equal(result.overallScore, 0.72);
+        assert.deepEqual(result.actionsTaken, ['detect', 'humanize']);
+        assert.match(result.rewrittenText, /^Human:AI sounding sentence one\./);
+        assert.match(result.rewrittenText, /Human casual sentence\./);
+        assert.equal(result.sections[0].flagged, true);
+        assert.equal(result.sections[1].flagged, false);
     });
 
-    it('notes when paraphrase was requested but API key is missing', async () => {
-        mock.method(detectionService, 'detect', async () => ({ score: 0.5 }));
+    it('skips rewrite when no API key is configured', async () => {
+        mock.method(detectionService, 'detectSentences', async () => ({
+            overallScore: 0.7,
+            backend: 'tfidf',
+            sentences: [
+                {
+                    id: 1,
+                    text: 'Only one sentence here.',
+                    start: 0,
+                    end: 23,
+                    score: 0.7,
+                },
+            ],
+        }));
         mock.method(paraphraseService, 'isEnabled', () => false);
 
-        const result = await agentService.analyze('Only one section here.', {
-            paraphraseCheck: true,
+        const result = await agentService.analyze('Only one sentence here.', {
+            flagThreshold: 0.6,
         });
 
-        assert.deepEqual(result.actionsTaken, ['split', 'detect']);
-        assert.ok(
-            result.caveats.some((c) => c.includes('GEMINI_API_KEY')),
-        );
+        assert.deepEqual(result.actionsTaken, ['detect']);
+        assert.equal(result.rewrittenText, 'Only one sentence here.');
+    });
+});
+
+describe('agentService.turn', () => {
+    afterEach(() => {
+        mock.restoreAll();
+        agentService.clearSessions();
+    });
+
+    it('asks for confirmation between sentence humanize steps', async () => {
+        mock.method(detectionService, 'detectSentences', async (text) => {
+            const sentences = splitSentences(text);
+            return {
+                overallScore: 0.7,
+                backend: 'hf',
+                sentences: sentences.map((s) => ({
+                    ...s,
+                    score: 0.7,
+                })),
+            };
+        });
+        mock.method(detectionService, 'detect', async () => ({ score: 0.25 }));
+        mock.method(paraphraseService, 'isEnabled', () => true);
+        mock.method(paraphraseService, 'humanize', async (text) => `H:${text}`);
+
+        const started = await agentService.turn({
+            action: 'start',
+            text: 'Hello world paragraph.',
+            options: { flagThreshold: 0.6 },
+        });
+        assert.equal(started.nextStep, 'humanize');
+        assert.equal(started.stepCompleted, 'detect');
+        assert.ok(started.partial.sections.length >= 1);
+
+        const humanized = await agentService.turn({
+            action: 'confirm',
+            sessionId: started.sessionId,
+        });
+        assert.equal(humanized.status, 'completed');
+        assert.ok(humanized.analysis.rewrittenText.startsWith('H:'));
     });
 });
