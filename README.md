@@ -29,10 +29,11 @@ Only the **API server** and **model service** need pings — the static frontend
 
 ```
 client (React + Vite + Redux Toolkit)
-    ↓  POST /agent/analyze   (sectioned integrity-style report)
+    ↓  POST /agent/analyze   (sectioned report + optional paraphrase recheck)
     ↓  POST /detection        (single score; still available)
 server (Express)
-    ↓  POST /predict
+    ├─ detect → model-service /predict
+    └─ paraphrase_recheck → Gemini or OpenAI (optional API key)
 model-service (FastAPI + scikit-learn)
 ```
 
@@ -80,7 +81,13 @@ Optional: copy `.env.example` to `.env` and adjust values:
 ```env
 MODEL_SERVICE_URL=http://localhost:8000
 CLIENT_URL=http://localhost:5173
+PARAPHRASE_PROVIDER=auto
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-3.5-flash-lite
+# or: OPENAI_API_KEY=sk-...
 ```
+
+Set `GEMINI_API_KEY` (preferred; free tier via Google AI Studio) or `OPENAI_API_KEY` to enable the v2 paraphrase robustness recheck. Without a key, analyze still works and notes that recheck was skipped.
 
 ### 3. Frontend (port 5173)
 
@@ -112,12 +119,15 @@ Health check.
 
 ### `POST /agent/analyze`
 
-Sectioned integrity-style analysis (v1): split text → detect overall + per section → structured report with tool trace and caveats.
+Sectioned integrity-style analysis (v2): split → detect overall + per section → optional paraphrase recheck on mid/high sections → structured report with tool trace and caveats.
 
 Request:
 
 ```json
-{ "text": "Paragraph one.\n\nParagraph two." }
+{
+  "text": "Paragraph one.\n\nParagraph two.",
+  "options": { "paraphraseCheck": true }
+}
 ```
 
 Response:
@@ -126,20 +136,21 @@ Response:
 {
   "overallScore": 0.72,
   "sections": [
-    { "id": 1, "excerpt": "Paragraph one.", "score": 0.68 },
-    { "id": 2, "excerpt": "Paragraph two.", "score": 0.81 }
+    { "id": 1, "excerpt": "Paragraph one.", "score": 0.68, "recheckScore": 0.51 },
+    { "id": 2, "excerpt": "Paragraph two.", "score": 0.81, "recheckScore": 0.77 }
   ],
-  "actionsTaken": ["split", "detect"],
+  "actionsTaken": ["split", "detect", "paraphrase_recheck"],
   "report": "Overall AI-likelihood estimate: 72% (medium risk band). ...",
   "caveats": [
     "Not proof of misconduct or AI authorship.",
     "Short sections and mixed human/AI text are less reliable.",
-    "Scores are model estimates and can be wrong; use human judgment."
+    "Scores are model estimates and can be wrong; use human judgment.",
+    "Paraphrase recheck probes score stability under wording changes; it is not a definitive test."
   ]
 }
 ```
 
-`overallScore` / section `score` values are estimated AI-likelihood (0–1).
+`recheckScore` is `null` when a section was not rechecked (low score, cap reached, or paraphrase disabled/unavailable).
 
 ### `POST /detection`
 

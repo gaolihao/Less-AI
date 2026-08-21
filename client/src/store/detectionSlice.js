@@ -8,11 +8,14 @@ function toPercent(score) {
 
 export const scanText = createAsyncThunk(
   'detection/scan',
-  async (text, { rejectWithValue }) => {
+  async ({ text, paraphraseCheck }, { rejectWithValue }) => {
     const response = await fetch(`${API_BASE}/agent/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({
+        text,
+        options: { paraphraseCheck },
+      }),
     });
 
     if (!response.ok) {
@@ -29,6 +32,10 @@ export const scanText = createAsyncThunk(
         id: section.id,
         excerpt: section.excerpt,
         aiScore: toPercent(section.score),
+        recheckScore:
+          typeof section.recheckScore === 'number'
+            ? toPercent(section.recheckScore)
+            : null,
       })),
       actionsTaken: data.actionsTaken ?? [],
       report: data.report ?? '',

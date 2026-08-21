@@ -13,12 +13,13 @@ This sample includes multiple paragraphs so the integrity-style analysis can sho
 function App() {
   const dispatch = useDispatch();
   const [text, setText] = useState('');
+  const [paraphraseCheck, setParaphraseCheck] = useState(true);
   const { result, status, error } = useSelector((state) => state.detection);
   const isScanning = status === 'loading';
 
   const handleScan = () => {
     if (!text.trim()) return;
-    dispatch(scanText(text));
+    dispatch(scanText({ text, paraphraseCheck }));
   };
 
   return (
@@ -26,7 +27,8 @@ function App() {
       <header className="header">
         <h1>AI Detector</h1>
         <p className="subtitle">
-          Sectioned screening report for human review — not a verdict.
+          Sectioned screening with optional paraphrase robustness recheck —
+          for human review, not a verdict.
         </p>
       </header>
 
@@ -38,6 +40,18 @@ function App() {
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
+
+          <label className="option-row">
+            <input
+              type="checkbox"
+              checked={paraphraseCheck}
+              onChange={(e) => setParaphraseCheck(e.target.checked)}
+            />
+            <span>
+              Paraphrase recheck (mid/high sections; needs{' '}
+              <code>GEMINI_API_KEY</code> or <code>OPENAI_API_KEY</code>)
+            </span>
+          </label>
 
           <div className="input-actions">
             <div className="input-actions-left">
@@ -109,7 +123,15 @@ function App() {
                   <li key={section.id}>
                     <div className="section-meta">
                       <span className="section-id">#{section.id}</span>
-                      <span className="section-score">{section.aiScore}%</span>
+                      <span className="section-score">
+                        {section.aiScore}%
+                        {section.recheckScore !== null && (
+                          <span className="section-recheck">
+                            {' '}
+                            → recheck {section.recheckScore}%
+                          </span>
+                        )}
+                      </span>
                     </div>
                     <p className="section-excerpt">{section.excerpt}</p>
                   </li>

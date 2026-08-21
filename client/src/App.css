@@ -72,6 +72,26 @@
   flex-wrap: wrap;
 }
 
+.option-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.option-row input {
+  margin-top: 2px;
+}
+
+.option-row code {
+  font-size: 0.75rem;
+  color: #475569;
+}
+
 .input-actions-left {
   display: flex;
   align-items: center;
@@ -302,6 +322,11 @@
 
 .section-score {
   color: #7c3aed;
+}
+
+.section-recheck {
+  color: #64748b;
+  font-weight: 500;
 }
 
 .section-excerpt {

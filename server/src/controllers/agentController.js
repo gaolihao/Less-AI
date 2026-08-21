@@ -4,7 +4,12 @@ class AgentController {
     analyze = async (req, res) => {
         try {
             const text = req.body?.text ?? '';
-            const analysis = await agentService.analyze(text);
+            const paraphraseCheck = req.body?.options?.paraphraseCheck;
+            const analysis = await agentService.analyze(text, {
+                ...(typeof paraphraseCheck === 'boolean'
+                    ? { paraphraseCheck }
+                    : {}),
+            });
             res.status(200).json(analysis);
         } catch (err) {
             console.error('Agent analyze failed:', err.message);
