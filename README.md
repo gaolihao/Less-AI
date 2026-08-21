@@ -1,6 +1,6 @@
-# Less AI — Humanizer Agent
+# Less AI — Humanizer
 
-A full-stack app that turns AI-sounding text into a more natural draft. A chat agent works **step by step with confirmations**: split into **sentences** → score each with an AI-vs-human detector (Hugging Face Inference when `HF_TOKEN` is set, otherwise TF-IDF) → humanize only sentences ≥60% AI-likelihood → stitch the document back.
+A full-stack app that turns AI-sounding text into a more natural draft. The UI walks you **step by step with confirmations**: split into **sentences** → score each with an AI-vs-human detector (Hugging Face Inference when `HF_TOKEN` is set, otherwise TF-IDF) → humanize only sentences ≥60% AI-likelihood → stitch the document back.
 
 The detection model (`models/tfidf_ovr_logreg/pipeline.joblib`) comes from [AI-Detector-ML](https://github.com/gaolihao/AI-Detector-ML) by [gaolihao](https://github.com/gaolihao).
 
@@ -29,9 +29,9 @@ Only the **API server** and **model service** need pings — the static frontend
 
 ```
 client (React chat UI)
-    ↓  POST /agent/turn      (stepwise humanize agent + confirmations)
-    ↓  POST /agent/analyze   (one-shot humanize)
-    ↓  POST /detection        (single score; still available)
+    ↓  POST /humanize/turn      (stepwise humanize + confirmations)
+    ↓  POST /humanize/analyze   (one-shot humanize)
+    ↓  POST /detection           (single score; still available)
 server (Express)
     ├─ detect sentences → model-service /predict/sentences
     └─ humanize flagged spans → Gemini or OpenAI
@@ -52,7 +52,7 @@ AIDetectorProject/
 │   ├── src/
 │   │   ├── controllers/
 │   │   ├── routers/
-│   │   └── services/       # detection + agent (split/detect/report)
+│   │   └── services/       # detection + humanize (split/detect/report)
 │   └── tests/
 └── model-service/          # Python inference service
 ```
@@ -98,7 +98,7 @@ GEMINI_MODEL=gemini-3.5-flash-lite
 # or: OPENAI_API_KEY=sk-...
 ```
 
-Set `GEMINI_API_KEY` (preferred; free tier via Google AI Studio) or `OPENAI_API_KEY` to enable rewriting. Without a key, the agent can still split/score and skip to returning the original text.
+Set `GEMINI_API_KEY` (preferred; free tier via Google AI Studio) or `OPENAI_API_KEY` to enable rewriting. Without a key, the app can still split/score and skip to returning the original text.
 
 ### 3. Frontend (port 5173)
 
@@ -128,9 +128,9 @@ Health check.
 { "status": "ok" }
 ```
 
-### `POST /agent/turn`
+### `POST /humanize/turn`
 
-Stepwise humanize agent with confirmation gates:
+Stepwise humanize flow with confirmation gates:
 
 1. `action: "start"` + text → **immediately** scores each sentence and flags ≥60%
 2. `action: "confirm"` → humanize flagged spans and **return the final draft** (with before/after scores when verification is on)
@@ -160,7 +160,7 @@ Response after start (scoring already done):
 
 Completed analysis includes `rewrittenText`, optional `rewrittenOverallScore`, and per-section rewrite fields.
 
-### `POST /agent/analyze`
+### `POST /humanize/analyze`
 
 One-shot helper that auto-confirms every step (useful for scripts/tests). Same final payload as a completed turn session.
 

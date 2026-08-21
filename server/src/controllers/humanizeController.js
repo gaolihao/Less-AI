@@ -1,14 +1,14 @@
-import agentService from '../services/agentService.js';
+import humanizeService from '../services/humanizeService.js';
 
-class AgentController {
+class HumanizeController {
     analyze = async (req, res) => {
         try {
             const text = req.body?.text ?? '';
             const options = normalizeOptions(req.body?.options);
-            const analysis = await agentService.analyze(text, options);
+            const analysis = await humanizeService.analyze(text, options);
             res.status(200).json(analysis);
         } catch (err) {
-            console.error('Agent analyze failed:', err.message);
+            console.error('Humanize analyze failed:', err.message);
             const status = err.statusCode === 400 ? 400 : 503;
             res.status(status).json({
                 error:
@@ -21,7 +21,7 @@ class AgentController {
 
     turn = async (req, res) => {
         try {
-            const result = await agentService.turn({
+            const result = await humanizeService.turn({
                 action: req.body?.action,
                 sessionId: req.body?.sessionId ?? null,
                 text: req.body?.text,
@@ -29,7 +29,7 @@ class AgentController {
             });
             res.status(200).json(result);
         } catch (err) {
-            console.error('Agent turn failed:', err.message);
+            console.error('Humanize turn failed:', err.message);
             const status = err.statusCode || 503;
             res.status(status).json({
                 error:
@@ -51,4 +51,4 @@ function normalizeOptions(options = {}) {
     return normalized;
 }
 
-export default new AgentController();
+export default new HumanizeController();

@@ -1,10 +1,10 @@
 import { describe, it, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import agentService, {
+import humanizeService, {
     splitSentences,
     stitchRewrites,
     shouldRewriteSection,
-} from '../../src/services/agentService.js';
+} from '../../src/services/humanizeService.js';
 import detectionService from '../../src/services/detectionService.js';
 import paraphraseService from '../../src/services/paraphraseService.js';
 
@@ -43,10 +43,10 @@ describe('shouldRewriteSection', () => {
     });
 });
 
-describe('agentService.analyze', () => {
+describe('humanizeService.analyze', () => {
     afterEach(() => {
         mock.restoreAll();
-        agentService.clearSessions();
+        humanizeService.clearSessions();
     });
 
     it('humanizes only flagged sentences and stitches the document', async () => {
@@ -64,7 +64,7 @@ describe('agentService.analyze', () => {
         mock.method(paraphraseService, 'isEnabled', () => true);
         mock.method(paraphraseService, 'humanize', async (text) => `Human:${text}`);
 
-        const result = await agentService.analyze(original, {
+        const result = await humanizeService.analyze(original, {
             flagThreshold: 0.6,
         });
 
@@ -92,7 +92,7 @@ describe('agentService.analyze', () => {
         }));
         mock.method(paraphraseService, 'isEnabled', () => false);
 
-        const result = await agentService.analyze('Only one sentence here.', {
+        const result = await humanizeService.analyze('Only one sentence here.', {
             flagThreshold: 0.6,
         });
 
@@ -101,10 +101,10 @@ describe('agentService.analyze', () => {
     });
 });
 
-describe('agentService.turn', () => {
+describe('humanizeService.turn', () => {
     afterEach(() => {
         mock.restoreAll();
-        agentService.clearSessions();
+        humanizeService.clearSessions();
     });
 
     it('asks for confirmation between sentence humanize steps', async () => {
@@ -123,7 +123,7 @@ describe('agentService.turn', () => {
         mock.method(paraphraseService, 'isEnabled', () => true);
         mock.method(paraphraseService, 'humanize', async (text) => `H:${text}`);
 
-        const started = await agentService.turn({
+        const started = await humanizeService.turn({
             action: 'start',
             text: 'Hello world paragraph.',
             options: { flagThreshold: 0.6 },
@@ -132,7 +132,7 @@ describe('agentService.turn', () => {
         assert.equal(started.stepCompleted, 'detect');
         assert.ok(started.partial.sections.length >= 1);
 
-        const humanized = await agentService.turn({
+        const humanized = await humanizeService.turn({
             action: 'confirm',
             sessionId: started.sessionId,
         });

@@ -44,13 +44,13 @@ function mapPayload(data) {
   };
 }
 
-export const agentTurn = createAsyncThunk(
+export const humanizeTurn = createAsyncThunk(
   'detection/turn',
   async (
     { action, sessionId, text, flagThresholdPercent },
     { rejectWithValue },
   ) => {
-    const response = await fetch(`${API_BASE}/agent/turn`, {
+    const response = await fetch(`${API_BASE}/humanize/turn`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -63,7 +63,7 @@ export const agentTurn = createAsyncThunk(
 
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
-      return rejectWithValue(body.error ?? 'Agent request failed');
+      return rejectWithValue(body.error ?? 'Humanize request failed');
     }
 
     const data = await response.json();
@@ -100,11 +100,11 @@ const detectionSlice = createSlice({
   },
   extraReducers(builder) {
     builder
-      .addCase(agentTurn.pending, (state) => {
+      .addCase(humanizeTurn.pending, (state) => {
         state.status = 'loading';
         state.error = null;
       })
-      .addCase(agentTurn.fulfilled, (state, action) => {
+      .addCase(humanizeTurn.fulfilled, (state, action) => {
         state.status = 'succeeded';
         state.sessionId =
           action.payload.status === 'completed' ||
@@ -117,7 +117,7 @@ const detectionSlice = createSlice({
             : null;
         state.result = action.payload.analysis;
       })
-      .addCase(agentTurn.rejected, (state, action) => {
+      .addCase(humanizeTurn.rejected, (state, action) => {
         state.status = 'failed';
         state.error = action.payload ?? action.error.message;
       });

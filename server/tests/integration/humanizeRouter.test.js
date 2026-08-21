@@ -2,7 +2,7 @@ import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
 import app from '../../src/app.js';
-import agentService from '../../src/services/agentService.js';
+import humanizeService from '../../src/services/humanizeService.js';
 import paraphraseService from '../../src/services/paraphraseService.js';
 
 function mockSentenceFetch() {
@@ -39,21 +39,21 @@ function mockSentenceFetch() {
     });
 }
 
-describe('agentRouter', () => {
+describe('humanizeRouter', () => {
     beforeEach(() => {
         mockSentenceFetch();
         mock.method(paraphraseService, 'isEnabled', () => false);
-        agentService.clearSessions();
+        humanizeService.clearSessions();
     });
 
     afterEach(() => {
         mock.restoreAll();
-        agentService.clearSessions();
+        humanizeService.clearSessions();
     });
 
-    it('POST /agent/analyze returns original text when rewrite is unavailable', async () => {
+    it('POST /humanize/analyze returns original text when rewrite is unavailable', async () => {
         const response = await request(app)
-            .post('/agent/analyze')
+            .post('/humanize/analyze')
             .send({
                 text: 'First sentence. Second sentence.',
                 options: { flagThresholdPercent: 60 },
@@ -66,12 +66,12 @@ describe('agentRouter', () => {
         assert.equal(response.body.rewrittenText, 'First sentence. Second sentence.');
     });
 
-    it('POST /agent/analyze humanizes flagged sentences when LLM is enabled', async () => {
+    it('POST /humanize/analyze humanizes flagged sentences when LLM is enabled', async () => {
         mock.method(paraphraseService, 'isEnabled', () => true);
         mock.method(paraphraseService, 'humanize', async (text) => `Nice ${text}`);
 
         const response = await request(app)
-            .post('/agent/analyze')
+            .post('/humanize/analyze')
             .send({
                 text: 'Only one mid-risk block for rewrite.',
                 options: { flagThresholdPercent: 60 },
@@ -85,12 +85,12 @@ describe('agentRouter', () => {
         assert.match(response.body.rewrittenText, /^Nice /);
     });
 
-    it('POST /agent/turn walks confirmations step by step', async () => {
+    it('POST /humanize/turn walks confirmations step by step', async () => {
         mock.method(paraphraseService, 'isEnabled', () => true);
         mock.method(paraphraseService, 'humanize', async (text) => `H ${text}`);
 
         const start = await request(app)
-            .post('/agent/turn')
+            .post('/humanize/turn')
             .send({
                 action: 'start',
                 text: 'Stepwise paragraph.',
@@ -101,13 +101,13 @@ describe('agentRouter', () => {
         assert.equal(start.body.stepCompleted, 'detect');
 
         const humanize = await request(app)
-            .post('/agent/turn')
+            .post('/humanize/turn')
             .send({ action: 'confirm', sessionId: start.body.sessionId });
         assert.equal(humanize.body.status, 'completed');
         assert.match(humanize.body.analysis.rewrittenText, /^H /);
     });
 
-    it('POST /agent/analyze returns 503 when model service is unavailable', async () => {
+    it('POST /humanize/analyze returns 503 when model service is unavailable', async () => {
         mock.restoreAll();
         mock.method(globalThis, 'fetch', async () => ({
             ok: false,
@@ -116,7 +116,7 @@ describe('agentRouter', () => {
         mock.method(paraphraseService, 'isEnabled', () => false);
 
         const response = await request(app)
-            .post('/agent/analyze')
+            .post('/humanize/analyze')
             .send({
                 text: 'Sample text',
                 options: { flagThresholdPercent: 60 },
