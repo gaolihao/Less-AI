@@ -251,7 +251,7 @@ function App() {
     <div className="app">
       <header className="header">
         <div className="header-copy">
-          <h1>Less AI</h1>
+          <h1>Humanizer</h1>
           <p className="subtitle">
             Step-by-step humanizer — sentence-level AI detection, then rewrite
             only the flagged spans.

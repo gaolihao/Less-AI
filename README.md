@@ -1,4 +1,4 @@
-# Less AI — Humanizer
+# Humanizer
 
 A full-stack app that turns AI-sounding text into a more natural draft. The UI walks you **step by step with confirmations**: split into **sentences** → score each with an AI-vs-human detector (Hugging Face Inference when `HF_TOKEN` is set, otherwise TF-IDF) → humanize only sentences ≥60% AI-likelihood → stitch the document back.
 
@@ -11,21 +11,6 @@ The detection model (`models/tfidf_ovr_logreg/pipeline.joblib`) comes from [AI-D
 | Frontend | [https://ai-text-detector-client.onrender.com](https://ai-text-detector-client.onrender.com) |
 | API | [https://ai-text-detector-server.onrender.com](https://ai-text-detector-server.onrender.com) |
 | Model service | [https://ai-text-detector-4xxg.onrender.com](https://ai-text-detector-4xxg.onrender.com) |
-
-### Keep-alive pings (Render free tier)
-
-Render spins down web services after ~15 minutes with no traffic. The first request after that can take 1–2 minutes while the API and model service wake up.
-
-**GitHub Actions (included):** `.github/workflows/keep-alive.yml` pings both services every 10 minutes. It runs on the default branch only — push the workflow to `main`/`master` for it to take effect. You can also trigger it manually from the Actions tab (`workflow_dispatch`).
-
-**Other options:**
-
-| Service | What to monitor | Interval |
-|---------|-----------------|----------|
-| [UptimeRobot](https://uptimerobot.com) | `GET` API `/` and model `/health` | 5 min (free) |
-| [cron-job.org](https://cron-job.org) | Same URLs | 10–14 min |
-
-Only the **API server** and **model service** need pings — the static frontend does not spin down.
 
 ```
 client (React chat UI)
